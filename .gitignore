@@ -1,0 +1,42 @@
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Logs and debugging files
+logs/
+*.log
+
+# Environment files
+*.env
+.DS_Store  # macOS metadata
+
+# Cached dependencies
+*.egg-info/
+
+# Checkpoints & Model Weights
+*.ckpt
+*.pth
+*.pt
+models/
+checkpoints/
+
+# TensorBoard logs
+runs/
+wandb/
+
+data/
+datasets/
+*.csv
+*.h5
+*.npz
+
+output.log
+
+properties-autoencoder/
