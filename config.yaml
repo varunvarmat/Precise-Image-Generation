@@ -1,0 +1,15 @@
+auto-encoder:
+  batch-size: 32
+  train-size: 0.8
+  test-size: 0.2
+  d_model: 16
+  n_heads: 4
+  dr_ff: 4
+  N: 2
+  schedule: [16,32,64]
+  dropout: 0.1
+  epochs: 100
+  l_r: 0.00001
+  lambda_reg: 0.1
+
+  
