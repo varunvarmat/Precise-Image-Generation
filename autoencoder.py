@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-import copy
 class BlockLayer(nn.Module):
     def __init__(self, attn, norm1, feed_forward,  norm2, up_sample_linear, dropout=0.1):
         super(BlockLayer, self).__init__()
@@ -45,6 +43,7 @@ class AttentionHead(nn.Module):
 
         # Dot Product of Queries and Keys
         attention = Q @ K.transpose(-2,-1) #5*5
+        print(attention.shape)
 
         # Scaling
         attention = attention / (self.head_size ** 0.5)

@@ -3,10 +3,8 @@
 # import torch.nn.functional as F
 # import math
 # import copy
-import numpy as np
-import json
-from torch.utils.data import random_split, TensorDataset
-from utils import train_test_loader, format_data, train_ae, verify, test_ae
+import os
+from utils import train_test_loader, train_test_ae, train_test_mlp_ae
 # to do:
 # 1.copy data(properties) to this machine 
 # 2.change properties.json to required format
@@ -22,14 +20,9 @@ from utils import train_test_loader, format_data, train_ae, verify, test_ae
     
 
 def main():
-    data=format_data()
-    trainloader,testloader=train_test_loader(data)
-    #print(len(trainloader.dataset))
-    #print(len(testloader.dataset))
-    #print("reached end")
-    autoencoder=train_ae(trainloader)
-    test_ae(autoencoder, testloader)
-    #verify()
+    print(f"Process ID: {os.getpid()}")
+    trainloader,testloader=train_test_loader("properties-mlp-autoencoder",read_from_file=True) #the dataloader has images and labels
+    train_test_mlp_ae(trainloader,testloader,"properties-mlp-autoencoder")
     
 
 

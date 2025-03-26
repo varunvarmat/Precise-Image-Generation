@@ -1,62 +1,213 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from torch.utils.data import DataLoader, random_split, TensorDataset
 import yaml
 import numpy as np
 import json
 import torch
-from properties_ae import AutoEncoder
+from autoencoder import AutoEncoder
+from properties_mlp_autoencoder import MLP_Autoencoder
 import torch.nn as nn
 from torch.optim import Adam
 from tqdm import tqdm
-from torch.utils.tensorboard import SummaryWriter
 import wandb
-import os
-def train_test_loader(data,read=True):
-    if read==False:
-        with open ('config.yaml', 'r') as file:
-            config = yaml.safe_load(file)
-        if not isinstance(data, torch.Tensor):
-            data = torch.tensor(data, dtype=torch.float32)
-        print(type(data))
-        dataset = TensorDataset(data)  # No labels
-        train_size=config['auto-encoder']['train-size']
-        #print(train_size)
-        test_size=config['auto-encoder']['test-size']
-        #print(test_size)
-        train_size = int(train_size * len(dataset))  # 80% train
-        #val_size = int(0.2 * len(dataset))
-        test_size = int(test_size * len(dataset))  # 20% test
+from PIL import Image
+import torchvision.transforms as transforms
+from torchvision.io import read_image
+from torch.utils.data import Dataset
 
+
+
+
+class CustomDataset(Dataset):
+    def __init__(self, annotations, img_dir, transform=None, target_transform=None):
+        self.img_labels = annotations
+        self.img_dir = img_dir
+        self.transform = transform
+        self.target_transform = target_transform
+
+    def __len__(self):
+        return len(self.img_labels)
+
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.img_dir, f"image_{idx}.png")
+        image = read_image(img_path)
+        label = self.img_labels[idx]
+        if self.transform:
+            image = self.transform(image)
+        if self.target_transform:
+            label = self.target_transform(label)
+        return image, label
+
+def train_test_loader(model, read_from_file=True):
+    with open ('config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+    label=format_data()
+    if not isinstance(label, torch.Tensor):
+            label = torch.tensor(label, dtype=torch.float32)
+    dataset = CustomDataset(label, "data/images")
+    train_indices,test_indices=None,None
+    if read_from_file==False:
+        # print(type(label))
+        train_size=config[model]['train-size']
+        test_size=config[model]['test-size']
+        train_size = int(train_size * len(dataset))  
+        test_size = int(test_size * len(dataset))  
         # Split dataset
-        train_set, test_set = random_split(dataset, [train_size, test_size])
-        torch.save(train_set, "data/train_data.pth")
-        torch.save(test_set, "data/test_data.pth")
-    else:
-        train_set=torch.load("train_data.pth")
-        test_set=torch.load('test_data.pth')
-    batch_size = config['auto-encoder']['batch-size']
-    #print(batch_size)
+        # train_set, test_set = random_split(dataset, [train_size, test_size])
+        # torch.save(train_set, "data/train_data.pt")
+        # torch.save(test_set, "data/test_data.pt")
+        train_indices, test_indices = torch.utils.data.random_split(range(len(dataset)), [train_size, test_size])
+        torch.save(train_indices, "data/train_indices.pt")
+        torch.save(test_indices, "data/test_indices.pt")
+
+        
+    # else:
+        # train_set=torch.load("data/train_data.pt",weights_only=False)
+        # test_set=torch.load('data/test_data.pt',weights_only=False)
+    if train_indices is None and test_indices is None:
+        train_indices = torch.load("data/train_indices.pt",weights_only=False)
+        test_indices = torch.load("data/test_indices.pt",weights_only=False)
+    train_set = torch.utils.data.Subset(dataset, train_indices)
+    test_set = torch.utils.data.Subset(dataset, test_indices)
+    batch_size = config[model]['batch-size']
     trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    testloader =DataLoader(test_set, batch_size=batch_size, shuffle=False)
-    #print("reached")
+    testloader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
     return trainloader,testloader
+
+
+
+def train_test_ae(trainloader,testloader, model_type, model, d_model=None, dr_ff=None, no_head=None, N=None, schedule=None, dropout=None, epochs=None, l_r=None, lambda_reg=None, train_size=None, test_size=None, batch_size=None):
+
+    with open ('config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+    d_model = config[model]['d_model']
+    dr_ff = config[model]['dr_ff']
+    no_head = config[model]['n_heads']
+    N = config[model]['N']
+    print(N)
+    schedule = config[model]['schedule']
+    print(schedule)
+    dropout = config[model]['dropout']
+    epochs = config[model]['epochs']
+    l_r = config[model]['l_r']
+    lambda_reg=config[model]['lambda_reg']
+    train_size=config[model]['train-size']
+    test_size=config[model]['test-size']
+    batch_size = config[model]['batch-size']
+
+    run_id = wandb.util.generate_id()
+    wandb.init(project=f"pig-{model}-autoencoder", name=run_id, config={
+    "train_size": train_size,
+    "test_size": test_size,
+    "d_model": d_model,
+    "dr_ff": dr_ff,
+    "no_heads": no_head,
+    "number of layers": N,
+    "schedule": schedule,
+    "dropout": dropout,
+    "epochs": epochs,
+    "batch_size": batch_size,
+    "learning_rate": l_r,
+    "lambda_reg": lambda_reg,})
+
+    #run_id = wandb.run.id
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
+    autoencoder = AutoEncoder(d_model, dr_ff, N, no_head, schedule, dropout).to(device)
+    #print(autoencoder)
+    print("reached")
+    optimizer = Adam(autoencoder.parameters(), lr=l_r)
+
+    epoch_bar = tqdm(total=epochs, desc="Epoch Progress", colour='blue', position=0)
+    for epoch in range(epochs):
+        print("reached1")
+        training_loss = 0.0
+        bar=tqdm(trainloader, desc=f"Epoch {epoch+1}/{epochs}", leave=False,colour='green', position=1)
+        for i, data in enumerate(bar):
+            print("reached2")
+            if model=="properties-encoder":
+                inputs = data[1]
+                # print(inputs.shape)
+            elif model=="image-decoder":
+                inputs==data[0]
+                inputs=inputs.flatten(start_dim=1)
+            inputs = inputs.to(device)
+            print(inputs.shape)
+            
+            optimizer.zero_grad()
+
+            reconstructed,latents= autoencoder(inputs)
+            loss = compute_loss(inputs, reconstructed, latents, lambda_reg) #per sample
+
+            loss.backward()
+            optimizer.step()
+
+            training_loss += loss.item()
+        bar.close()
+        epoch_bar.update(1)
+        epoch_bar.set_postfix(loss=f"{training_loss / len(trainloader):.4f}") 
+        wandb.log({"Training Loss": training_loss/len(trainloader), "Epoch": epoch + 1})
+    if model=="properties-encoder":
+        os.makedirs("properties-autoencoders", exist_ok=True)
+        model_filename = f"properties-autoencoders/autoencoder_{run_id}.pth"  
+    elif model=="image-decoder":
+        os.makedirs("image-autoencoders", exist_ok=True)
+        model_filename = f"image-autoencoders/autoencoder_{run_id}.pth"
+
+    torch.save(autoencoder.state_dict(), model_filename)
+    avg_loss=test_ae(autoencoder, testloader,model)
+    wandb.log({"Test Loss": avg_loss})
+    wandb.finish()
+    return autoencoder
+
+def compute_loss(original, reconstructed, latent=None,lambda_reg=0):
+    mse_loss = nn.MSELoss()
+    mse = mse_loss(reconstructed, original)  # Reconstruction loss
+    if latent is not None and lambda_reg is not None:
+        l2_reg = torch.norm(latent, p=2)  # L2 norm (Frobenius norm)
+    else:
+        l2_reg=0
+    return mse + lambda_reg * l2_reg
+
+def test_ae(autoencoder,testloader,model):
+    #total = 0
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    test_loss=0
+    autoencoder.eval()
+    with torch.no_grad():
+        for data in testloader:
+            inputs = data[1]
+            if model=="properties-encoder" or "properties_mlp_autoencoder":
+                inputs = data[1]
+            elif model=="image-decoder":
+                inputs==data[0]
+                inputs=inputs.flatten(start_dim=1)
+            inputs = inputs.to(device)
+
+            outputs,_ = autoencoder(inputs)
+            loss = compute_loss(inputs, outputs)
+
+            test_loss=test_loss+loss
+            #total += inputs.size(0)
+        print(f'\nAverage loss: {test_loss/len(testloader)}')
+        return test_loss / len(testloader)
+
+
+
 
 def normalize(val,min_val,max_val,property):
     if val<min_val or val>max_val:
-        #print(property)
-        #print(val)
         val=np.round(val)
-        #print(val)
-        #print("error")
     return (val - min_val) / (max_val - min_val)
 
 def format_data():
     with open("data/properties/properties.json", "r") as f:
         properties = json.load(f)
-    #print(properties[0])
     n_samples=len(properties)
     data=[]
     for sample in properties:
-        #property=[]
         azi_cam=sample['azimuth_camera']
         azi_cam/=2*np.pi
         elev_cam=sample['elevation_camera']
@@ -99,55 +250,38 @@ def format_data():
 
         #object_properties=[x_pos,y_pos,z_pos,z_rotation,size]
         object_properties=[x_pos,y_pos,z_rotation,size]
-        # print(scene_properties)
-        # print(shape_properties)
-        # print(colour)
-        # print(material_properties)
-        # print(object_properties)
         property=scene_properties+shape_properties+colour+material_properties+object_properties
-        # print(len(property))  
-        # print(property)
         data.append(property)
     data=np.array(data)
     #print(np.shape(data))
     return data
 
-def train_ae(trainloader):
+
+
+def train_test_mlp_ae(trainloader,testloader,model):
 
     with open ('config.yaml', 'r') as file:
         config = yaml.safe_load(file)
-    d_model = config['auto-encoder']['d_model']
-    #print(d_model)
-    dr_ff = config['auto-encoder']['dr_ff']
-    #print(dr_ff)
-    no_head = config['auto-encoder']['n_heads']
-    #print(no_head)
-    N = config['auto-encoder']['N']
-    #print(N)
-    schedule = config['auto-encoder']['schedule']
-    #print(type(schedule))
-    dropout = config['auto-encoder']['dropout']
-    #print(dropout)
-    epochs = config['auto-encoder']['epochs']
-    #print(epochs)
-    l_r = config['auto-encoder']['l_r']
-    #print(l_r)
-    lambda_reg=config['auto-encoder']['lambda_reg']
-    train_size=config['auto-encoder']['train-size']
-    test_size=config['auto-encoder']['test-size']
-    batch_size = config['auto-encoder']['batch-size']
-    #print(lambda_reg)
+    N = config[model]['N']
+    print(N)
+    schedule = config[model]['schedule']
+    print(schedule)
+    # dropout = config[model]['dropout']
+    epochs = config[model]['epochs']
+    l_r = config[model]['l_r']
+    lambda_reg=config[model]['lambda_reg']
+    train_size=config[model]['train-size']
+    test_size=config[model]['test-size']
+    batch_size = config[model]['batch-size']
 
     run_id = wandb.util.generate_id()
-    wandb.init(project="pig-properties-autoencoder", name=run_id, config={
+    wandb.init(project=f"pig-{model}-autoencoder", name=run_id, config={
     "train_size": train_size,
     "test_size": test_size,
-    "d_model": d_model,
-    "dr_ff": dr_ff,
-    "no_heads": no_head,
+    
     "number of layers": N,
     "schedule": schedule,
-    "dropout": dropout,
+    # "dropout": dropout,
     "epochs": epochs,
     "batch_size": batch_size,
     "learning_rate": l_r,
@@ -157,108 +291,61 @@ def train_ae(trainloader):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
-
-    autoencoder = AutoEncoder(d_model, dr_ff, N, no_head, schedule, dropout).to(device)
+    autoencoder = MLP_Autoencoder(N,schedule).to(device)
     #print(autoencoder)
-
+    # print("reached")
     optimizer = Adam(autoencoder.parameters(), lr=l_r)
 
     epoch_bar = tqdm(total=epochs, desc="Epoch Progress", colour='blue', position=0)
     for epoch in range(epochs):
-
-        #loss_per_batch=0
+        # print("reached1")
         training_loss = 0.0
-        bar=tqdm(trainloader, desc=f"Epoch {epoch+1}/{epochs}", leave=False,colour='blue', position=1)
+        bar=tqdm(trainloader, desc=f"Epoch {epoch+1}/{epochs}", leave=False,colour='green', position=1)
         for i, data in enumerate(bar):
-            #print(data)
-            # print(type(data))
-            # print(len(data))
-            #print(data)
-            inputs = data[0]
-            # print(type(inputs))
-            # if not isinstance(data, torch.Tensor):
-            #     inputs = torch.tensor(inputs, dtype=torch.float32)
+            # print("reached2")
+            if model=="properties-encoder" or "properties-mlp-autoencoder":
+                inputs = data[1]
+                # print(inputs.shape)
+            elif model=="image-decoder":
+                inputs==data[0]
+                inputs=inputs.flatten(start_dim=1)
             inputs = inputs.to(device)
+            # print(inputs.shape)
             
             optimizer.zero_grad()
 
             reconstructed,latents= autoencoder(inputs)
-            loss = compute_loss(inputs, reconstructed, latents, lambda_reg)
-            #loss_per_batch+=loss.item()
+            loss = compute_loss(inputs, reconstructed, latents, lambda_reg) #per sample
+
             loss.backward()
             optimizer.step()
 
             training_loss += loss.item()
         bar.close()
         epoch_bar.update(1)
-        epoch_bar.set_postfix(loss=f"{training_loss / len(trainloader):.4f}")
-        #loss_per_batch=loss_per_batch/(i+1)
-        #loss_curve.append(loss_per_batch)
-        #print(f'Epoch {epoch + 1}/{epochs} loss: {training_loss  / len(trainloader) :.3f}')
-    os.makedirs("properties-autoencoders", exist_ok=True)
-    model_filename = f"properties-autoencoders/autoencoder_{run_id}.pth"  # Filename with WandB Run ID
+        epoch_bar.set_postfix(loss=f"{training_loss / len(trainloader):.4f}") 
+        wandb.log({"Training Loss": training_loss/len(trainloader), "Epoch": epoch + 1})
+    if model=="properties-encoder":
+        os.makedirs("properties-autoencoders", exist_ok=True)
+        model_filename = f"properties-autoencoders/autoencoder_{run_id}.pth"  
+    elif model=="image-decoder":
+        os.makedirs("image-autoencoders", exist_ok=True)
+        model_filename = f"image-autoencoders/autoencoder_{run_id}.pth"
+
     torch.save(autoencoder.state_dict(), model_filename)
+    avg_loss=test_ae(autoencoder, testloader,model)
+    wandb.log({"Test Loss": avg_loss})
     wandb.finish()
     return autoencoder
 
-def compute_loss(original, reconstructed, latent=None,lambda_reg=0):
-    mse_loss = nn.MSELoss()
-    mse = mse_loss(reconstructed, original)  # Reconstruction loss
-    if latent is not None and lambda_reg is not None:
-        l2_reg = torch.norm(latent, p=2)  # L2 norm (Frobenius norm)
-    else:
-        l2_reg=0
-    return mse + lambda_reg * l2_reg
 
-def test_ae(autoencoder,testloader):
-    total = 0
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    test_loss=0
-    autoencoder.eval()
-    with torch.no_grad():
-        for data in testloader:
-            inputs = data[0]
-            inputs = inputs.to(device)
 
-            outputs,_ = autoencoder(inputs)
-            loss = compute_loss(inputs, outputs)
 
-            test_loss=test_loss+loss
-            total += inputs.size(0)
-        print(f'\nAverage loss: {100 * test_loss/total} %')
-        return 100 * test_loss / total
+
     
-def verify():
-    with open ('config.yaml', 'r') as file:
-        config = yaml.safe_load(file)
-    d_model = config['auto-encoder']['d_model']
-    #print(d_model)
-    dr_ff = config['auto-encoder']['dr_ff']
-    #print(dr_ff)
-    no_head = config['auto-encoder']['n_heads']
-    #print(no_head)
-    N = config['auto-encoder']['N']
-    #print(N)
-    schedule = config['auto-encoder']['schedule']
-    #print(type(schedule))
-    dropout = config['auto-encoder']['dropout']
+    
 
 
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
-    model = AutoEncoder(d_model, dr_ff, N, no_head, schedule, dropout).to(device)
 
-    # Create dummy input matching the input shape (batch_size=1, features=10)
-    dummy_input = torch.randn(1, 16).to(device)
-
-    # Initialize TensorBoard writer
-    writer = SummaryWriter("runs/model_graph")
-
-    # Log the model architecture
-    writer.add_graph(model, dummy_input)
-
-    # Close the writer
-    writer.close()
-
-
+    
