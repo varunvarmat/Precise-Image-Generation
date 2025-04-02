@@ -40,3 +40,7 @@ datasets/
 output.log
 
 properties-autoencoder/
+discriminator-images/
+image-cnn-autoencoders/
+properties-autoencoders/
+properties-mlp-autoencoders/
