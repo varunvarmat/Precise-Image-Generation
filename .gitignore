@@ -31,7 +31,9 @@ checkpoints/
 runs/
 wandb/
 
-data/
+data_res_64/
+data_res_128/
+data_res_256/
 datasets/
 *.csv
 *.h5
