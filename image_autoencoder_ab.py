@@ -52,6 +52,7 @@ class Postnet(nn.Module):
             nn.ReLU(),
 
             nn.Conv2d(32, in_channels, kernel_size=3, padding=1),
+            nn.Sigmoid()
         )
 
     def forward(self, x):
